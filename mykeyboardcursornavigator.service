@@ -1,0 +1,11 @@
+[Unit]
+Description=My Keyboard Daemon
+
+[Service]
+ExecStart=/usr/local/bin/keyboard-navigation-lucas
+# lines below are so that the service can access the X session
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/lucsturci/.Xauthority
+
+[Install]
+WantedBy=multi-user.target
