@@ -77,7 +77,6 @@ void go(std::vector<std::string> input_files) {
                             }
                             if(keymap[KEY_CAPSLOCK]) {
                                 if(ev.code == KEY_X) {
-                                    // system("xdotool click 1");
                                     int ret = xdo_click_window(xdo, CURRENTWINDOW, 1);
                                     if (ret) {
                                         fprintf(stderr, "Error clicking mouse: %d\n", ret);
@@ -119,13 +118,10 @@ void go(std::vector<std::string> input_files) {
                 delta_y += speed;
             }
             if(delta_x || delta_y) {
-                // char command[60];
-                // sprintf(command, "xdotool mousemove_relative -- %d %d", delta_x, delta_y);
                 int ret = xdo_move_mouse_relative(xdo, delta_x, delta_y);
                 if (ret) {
                     fprintf(stderr, "Error moving mouse: %d\n", ret);
                 }
-                // system(command);                    
             }
         }
         usleep(1000000/30); // 30 fps
