@@ -18,6 +18,12 @@ extern "C" { // see github issue response: https://github.com/jordansissel/xdoto
 
 #define EV_PRESSED 1
 #define EV_RELEASED 0
+#define BOOST 800
+#define SPACE_INTERVAL 10
+#define BOOST_MAX_SPEED 1500
+#define MAX_SPEED 1000
+
+#define ACC 8
 
 using std::map;
 
@@ -64,6 +70,11 @@ void go(std::vector<std::string> input_files) {
         {KEY_SPACE, false},
     };
 
+    int cur_speed = 400;
+    int last_speed;
+    int space_interval_tick = -1;
+    bool boost_enabled = false;
+
     while(1) {
         for (auto dev : devs) {
             while (libevdev_has_event_pending(dev)) {
@@ -83,6 +94,14 @@ void go(std::vector<std::string> input_files) {
                                     }
                                 }
                             }
+                            if(ev.code == KEY_SPACE) {
+                                if(space_interval_tick < SPACE_INTERVAL) {
+                                    cur_speed = last_speed;
+                                    cur_speed += BOOST;
+                                    boost_enabled = true;
+                                }
+                                space_interval_tick = 0;
+                            }
                         } else if(ev.value == EV_RELEASED) {
                             if (keymap.find(ev.code) != keymap.end()) {
                                 keymap[ev.code] = false;
@@ -95,30 +114,52 @@ void go(std::vector<std::string> input_files) {
         }
         // different actions
         if(keymap[KEY_CAPSLOCK]) {
-            int speed = 4;
-            if (keymap[KEY_SPACE]) {
-                speed *= 5;
-            }
+            
             int delta_x = 0;
             int delta_y = 0;
+            bool moving = false;
             if (keymap[KEY_A]) {
                 // travel left
-                delta_x += -speed;
+                delta_x += -cur_speed;
+                moving = true;
             }
             if (keymap[KEY_D]) {
                 // travel right
-                delta_x += speed;
+                delta_x += cur_speed;
+                moving = true;
             }
             if (keymap[KEY_W]) {
                 // travel up
-                delta_y += -speed;
+                delta_y += -cur_speed;
+                moving = true;
             }
             if (keymap[KEY_S]) {
                 // travel down
-                delta_y += speed;
+                delta_y += cur_speed;
+                moving = true;
+            }
+            if(!moving) {
+                cur_speed = 400;
+            }
+            if (keymap[KEY_SPACE]) {
+                cur_speed += ACC;
+                if(cur_speed > (boost_enabled? BOOST_MAX_SPEED : MAX_SPEED)) {
+                    cur_speed = boost_enabled? BOOST_MAX_SPEED : MAX_SPEED;
+                }
+                delta_x *= 5;
+                delta_y *= 5;
+                
+                last_speed = cur_speed;
+            } else {
+                space_interval_tick++;
+                if(space_interval_tick > SPACE_INTERVAL) {
+                    space_interval_tick = SPACE_INTERVAL;
+                }
+                boost_enabled = false;
+                cur_speed = 400;
             }
             if(delta_x || delta_y) {
-                int ret = xdo_move_mouse_relative(xdo, delta_x, delta_y);
+                int ret = xdo_move_mouse_relative(xdo, delta_x/100, delta_y/100);
                 if (ret) {
                     fprintf(stderr, "Error moving mouse: %d\n", ret);
                 }
