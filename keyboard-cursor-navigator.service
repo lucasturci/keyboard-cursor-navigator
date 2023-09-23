@@ -1,0 +1,11 @@
+[Unit]
+Description=Keyboard Cursor Navigator
+
+[Service]
+ExecStart=/usr/local/bin/keyboard-cursor-navigator
+# lines below are so that the service can access the X session
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/<username>/.Xauthority
+
+[Install]
+WantedBy=multi-user.target

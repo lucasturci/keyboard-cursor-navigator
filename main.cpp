@@ -11,6 +11,8 @@
 #include <sstream>
 #include <iostream>
 #include <vector>
+#include <algorithm>
+#include <csignal>
 
 extern "C" { // see github issue response: https://github.com/jordansissel/xdotool/issues/63#issuecomment-136887557
     #include <xdo.h>
@@ -26,6 +28,38 @@ extern "C" { // see github issue response: https://github.com/jordansissel/xdoto
 #define ACC 8
 
 using std::map;
+using std::pair;
+
+// devices
+std::vector<pair<struct libevdev*, std::string>> devs;
+xdo_t * xdo;
+
+std::vector<int> cleanup_signals = {SIGINT, SIGTERM, SIGQUIT, SIGABRT, SIGHUP, SIGSEGV, SIGPIPE};
+
+void close_evdev(struct libevdev* dev) {
+    int fd = libevdev_get_fd(dev);
+
+    if(fd >= 0) {
+        libevdev_free(dev);
+
+        // Set the file descriptor to non-blocking mode before closing
+        int flags = fcntl(fd, F_GETFL);
+        flags |= O_NONBLOCK;
+        fcntl(fd, F_SETFL, flags);
+        
+        close(fd);
+    }
+}
+
+void cleanup(int signum) {
+    if(std::find(cleanup_signals.begin(), cleanup_signals.end(), signum) != cleanup_signals.end()) {
+        for(auto [dev, _] : devs) {
+            close_evdev(dev);
+        }
+        devs.clear();
+    }
+    exit(signum);
+}
 
 std::string exec(const char* cmd) {
     char buffer[128];
@@ -45,20 +79,29 @@ std::string exec(const char* cmd) {
 }
 
 void go(std::vector<std::string> input_files) {
-    xdo_t * xdo = xdo_new(NULL);
+    xdo = xdo_new(NULL);
     char event_file[30];
     
-    std::vector<struct libevdev*> devs;
     for(auto input_file : input_files) {
         sprintf(event_file, "/dev/input/event%s", input_file.substr(5).c_str());
         int fd = open(event_file, O_RDONLY);
+        if(fd < 0) {
+            fprintf(stderr, "Could not open file descriptor for %s\n", event_file);
+            continue;
+        }
         struct libevdev * dev = NULL;
         int rc = libevdev_new_from_fd(fd, &dev);
         if (rc < 0) {
             fprintf(stderr, "Could not create evdev for file %s\n", event_file);
+            close(fd);
             continue;
         }
-        devs.push_back(dev);
+        if(libevdev_has_event_type(dev, EV_KEY) && libevdev_has_event_code(dev, EV_KEY, KEY_CAPSLOCK)) {
+            fprintf(stderr, "Registering dev from %s\n", input_file.c_str());
+            devs.emplace_back(dev, event_file);
+        } else {
+            close_evdev(dev);
+        }
     }
 
     map<int, bool> keymap = {
@@ -70,13 +113,17 @@ void go(std::vector<std::string> input_files) {
         {KEY_SPACE, false},
     };
 
+    std::signal(SIGINT, cleanup);
+
     int cur_speed = 400;
     int last_speed;
     int space_interval_tick = -1;
     bool boost_enabled = false;
 
     while(1) {
-        for (auto dev : devs) {
+        std::vector<int> to_remove;
+        for (int i = 0; i < devs.size(); ++i) {
+            auto [dev, name] = devs[i];
             while (libevdev_has_event_pending(dev)) {
                 struct input_event ev;
                 int rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
@@ -112,6 +159,19 @@ void go(std::vector<std::string> input_files) {
                 }
             }
         }
+
+        for(int i = 0, j = 0; i < devs.size(); ++i) {
+            if (j < to_remove.size() && i == to_remove[j]) {
+                auto [dev, name] = devs[j];
+                close_evdev(dev);
+                fprintf(stderr, "Removing dev from %s\n", name.c_str());
+                j++;
+                continue;
+            }
+            devs[i - j] = devs[i];
+        }
+        devs.resize(devs.size() - to_remove.size());
+
         // different actions
         if(keymap[KEY_CAPSLOCK]) {
             
@@ -203,9 +263,9 @@ int main(int argc, char * argv[]) {
         
         if(line.size() == 0) {
             // decide to push back or not and reset variables
-            if(put && !dontput) {
+            // if(put && !dontput) {
                 input_files.push_back(input_file);
-            }
+            // }
             put = dontput = false;
             input_file = "";
             phys_input_file = "";
