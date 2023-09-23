@@ -121,7 +121,6 @@ void go(std::vector<std::string> input_files) {
     bool boost_enabled = false;
 
     while(1) {
-        std::vector<int> to_remove;
         for (int i = 0; i < devs.size(); ++i) {
             auto [dev, name] = devs[i];
             while (libevdev_has_event_pending(dev)) {
@@ -159,18 +158,6 @@ void go(std::vector<std::string> input_files) {
                 }
             }
         }
-
-        for(int i = 0, j = 0; i < devs.size(); ++i) {
-            if (j < to_remove.size() && i == to_remove[j]) {
-                auto [dev, name] = devs[j];
-                close_evdev(dev);
-                fprintf(stderr, "Removing dev from %s\n", name.c_str());
-                j++;
-                continue;
-            }
-            devs[i - j] = devs[i];
-        }
-        devs.resize(devs.size() - to_remove.size());
 
         // different actions
         if(keymap[KEY_CAPSLOCK]) {
