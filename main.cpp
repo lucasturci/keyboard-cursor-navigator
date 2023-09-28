@@ -13,6 +13,9 @@
 #include <vector>
 #include <algorithm>
 #include <csignal>
+#include <sys/resource.h>
+#include <errno.h>
+#include <string.h>
 
 extern "C" { // see github issue response: https://github.com/jordansissel/xdotool/issues/63#issuecomment-136887557
     #include <xdo.h>
@@ -58,7 +61,19 @@ void cleanup(int signum) {
         }
         devs.clear();
     }
+    xdo_free(xdo);
     exit(signum);
+}
+
+// Initialize core dump file limits for post-mortem debugging
+void init() {
+    struct rlimit limit;
+    limit.rlim_cur = RLIM_INFINITY;
+    limit.rlim_max = RLIM_INFINITY;
+    int rv = setrlimit(RLIMIT_CORE, &limit);
+    if (rv) {
+        fprintf(stderr, "Unable to set limit for core dump file size: %s\n", strerror(errno));
+    }
 }
 
 std::string exec(const char* cmd) {
@@ -78,12 +93,13 @@ std::string exec(const char* cmd) {
     return result;
 }
 
-void go(std::vector<std::string> input_files) {
+void go(int device_count) {
     xdo = xdo_new(NULL);
+    xdo->close_display_when_freed = 1;
     char event_file[30];
     
-    for(auto input_file : input_files) {
-        sprintf(event_file, "/dev/input/event%s", input_file.substr(5).c_str());
+    for(int i = 0; i < device_count; ++i) {
+        sprintf(event_file, "/dev/input/event%d", i);
         int fd = open(event_file, O_RDONLY);
         if(fd < 0) {
             fprintf(stderr, "Could not open file descriptor for %s\n", event_file);
@@ -97,7 +113,7 @@ void go(std::vector<std::string> input_files) {
             continue;
         }
         if(libevdev_has_event_type(dev, EV_KEY) && libevdev_has_event_code(dev, EV_KEY, KEY_CAPSLOCK)) {
-            fprintf(stderr, "Registering dev from %s\n", input_file.c_str());
+            fprintf(stderr, "Registering dev from event%d\n", i);
             devs.emplace_back(dev, event_file);
         } else {
             close_evdev(dev);
@@ -216,70 +232,9 @@ void go(std::vector<std::string> input_files) {
     }
 }
 
-std::vector<std::string> splitStringByDelimiter(std::string str, char delimiter) {
-    std::vector<std::string> result;
-    std::istringstream ss(str);
-    std::string token;
-    while(getline(ss, token, delimiter)) {
-        result.push_back(token);
-    }
-    return result;
-}
-
-std::string toLowercase(std::string str) {
-    std::string result = "";
-    for(int i = 0; i < str.size(); i++) {
-        result += tolower(str[i]);
-    }
-    return result;
-}
-
 int main(int argc, char * argv[]) {
-    std::string devices_output = exec("cat /proc/bus/input/devices");
-
-    std::istringstream ss(devices_output);
-    std::string line;
-
-    std::string input_file;
-    std::string phys_input_file;
-    std::vector<std::string> input_files;
-
-    bool put = false;
-    bool dontput = false;
-    while(getline(ss, line, '\n')) {
-        
-        if(line.size() == 0) {
-            // decide to push back or not and reset variables
-            // if(put && !dontput) {
-                input_files.push_back(input_file);
-            // }
-            put = dontput = false;
-            input_file = "";
-            phys_input_file = "";
-        }
-
-        if(line[0] == 'S') {
-            input_file = splitStringByDelimiter(line, '/').back();
-        } else if(line[0] == 'B') {
-            if(line == "B: EV=120013") {
-                put = true;
-            }
-        } else if(line[0] == 'N') {
-            line = toLowercase(line);
-            if(line.find("keyboard") != std::string::npos) {
-                put = true;
-            } else if(line.find("mouse") != std::string::npos) {
-                dontput = true;
-            } else if(line.find("transceiver") != std::string::npos) {
-                put = true;
-            }
-        } else if(line[0] == 'P') {
-            phys_input_file = splitStringByDelimiter(line, '/').back();
-            if(phys_input_file != "input0") {
-                dontput = true;
-            }
-        }
-    }
-
-    go(input_files);
+    init();
+    std::string device_count_str = exec("cat /proc/bus/input/devices | grep '^$' | wc -l");
+    int device_count = stoi(device_count_str);
+    go(device_count);
 }
