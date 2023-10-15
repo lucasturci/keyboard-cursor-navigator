@@ -94,7 +94,11 @@ std::string exec(const char* cmd) {
 }
 
 void go(int device_count) {
-    xdo = xdo_new(NULL);
+    xdo = xdo_new(":0");
+    if(xdo == NULL) {
+        fprintf(stderr, "Could not create xdo device, xdo_new returned NULL\n");
+        exit(1);
+    }
     xdo->close_display_when_freed = 1;
     char event_file[30];
     
